@@ -17,6 +17,11 @@ class TranslationViewModel: ObservableObject {
     @Published var apiKey: String = UserDefaults.standard.string(forKey: "apiKey") ?? ""
     @Published var apiBaseURL: String = UserDefaults.standard.string(forKey: "apiBaseURL") ?? "https://api.openai.com/v1/chat/completions"
     @Published var model: String = UserDefaults.standard.string(forKey: "model") ?? "gpt-3.5-turbo"
+    
+    // ユーザーが追加可能なモデル一覧（永続化）
+    @Published var availableModels: [String] =
+        UserDefaults.standard.stringArray(forKey: "availableModels")
+        ?? ["gpt-3.5-turbo","gpt-4","gpt-4o-mini"]
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -42,10 +47,14 @@ class TranslationViewModel: ObservableObject {
 
         // inputText の変更を 1 秒デバウンスしてから翻訳実行
         $inputText
-            .debounce(for: .seconds(1), scheduler: RunLoop.main)
+            .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 self?.translate()
             }
+            .store(in: &cancellables)
+        
+        $availableModels
+            .sink { UserDefaults.standard.set($0, forKey: "availableModels") }
             .store(in: &cancellables)
     }
 
