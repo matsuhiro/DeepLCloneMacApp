@@ -24,6 +24,7 @@ class TranslationViewModel: ObservableObject {
         ?? ["gpt-3.5-turbo","gpt-4","gpt-4o-mini"]
 
     private var cancellables = Set<AnyCancellable>()
+    private let debounceInterval: TimeInterval = 0.3
 
     init() {
         // 言語設定変更時に永続化
@@ -44,18 +45,37 @@ class TranslationViewModel: ObservableObject {
         $model
             .sink { UserDefaults.standard.set($0, forKey: "model") }
             .store(in: &cancellables)
-
-        // inputText の変更を 1 秒デバウンスしてから翻訳実行
-        $inputText
-            .debounce(for: .seconds(0.3), scheduler: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.translate()
-            }
-            .store(in: &cancellables)
         
         $availableModels
             .sink { UserDefaults.standard.set($0, forKey: "availableModels") }
             .store(in: &cancellables)
+        
+        // inputText の変更を 1 秒デバウンスしてから翻訳実行
+        $inputText
+            .debounce(for: .seconds(debounceInterval), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.translate() }
+            .store(in: &cancellables)
+        
+        // 入力言語が変わったら即翻訳
+        $inputLanguage
+          .dropFirst()  // 初期化直後の呼び出しを防ぎたい場合
+          .debounce(for: .seconds(debounceInterval), scheduler: RunLoop.main)
+          .sink { [weak self] _ in self?.translate() }
+          .store(in: &cancellables)
+
+        // 出力言語が変わったら即翻訳
+        $outputLanguage
+          .dropFirst()
+          .debounce(for: .seconds(debounceInterval), scheduler: RunLoop.main)
+          .sink { [weak self] _ in self?.translate() }
+          .store(in: &cancellables)
+
+        // モデルを切り替えたら即翻訳
+        $model
+          .dropFirst()
+          .debounce(for: .seconds(debounceInterval), scheduler: RunLoop.main)
+          .sink { [weak self] _ in self?.translate() }
+          .store(in: &cancellables)
     }
 
     /// 翻訳リクエストを実行
