@@ -13,24 +13,12 @@ class TranslationViewModel: ObservableObject {
     @Published var inputLanguage: String = UserDefaults.standard.string(forKey: "inputLanguage") ?? "auto"
     @Published var outputLanguage: String = UserDefaults.standard.string(forKey: "outputLanguage") ?? "en"
 
+    // APIキー／URL／モデル名も UserDefaults 経由で永続化
+    @Published var apiKey: String = UserDefaults.standard.string(forKey: "apiKey") ?? ""
+    @Published var apiBaseURL: String = UserDefaults.standard.string(forKey: "apiBaseURL") ?? "https://api.openai.com/v1/chat/completions"
+    @Published var model: String = UserDefaults.standard.string(forKey: "model") ?? "gpt-3.5-turbo"
+
     private var cancellables = Set<AnyCancellable>()
-
-    /// 環境変数から取得した API キー
-    private var apiKey: String {
-        guard let key = ProcessInfo.processInfo.environment["OPENAI_API_KEY"], !key.isEmpty else {
-            fatalError("Missing OPENAI_API_KEY in environment")
-        }
-        return key
-    }
-
-    /// 環境変数から取得したエンドポイント URL
-    private var endpoint: URL {
-        guard let urlString = ProcessInfo.processInfo.environment["OPENAI_API_BASE_URL"],
-              let url = URL(string: urlString) else {
-            fatalError("Missing or invalid OPENAI_API_BASE_URL in environment")
-        }
-        return url
-    }
 
     init() {
         // 言語設定変更時に永続化
@@ -39,6 +27,17 @@ class TranslationViewModel: ObservableObject {
             .store(in: &cancellables)
         $outputLanguage
             .sink { UserDefaults.standard.set($0, forKey: "outputLanguage") }
+            .store(in: &cancellables)
+
+        // API設定変更時にも永続化
+        $apiKey
+            .sink { UserDefaults.standard.set($0, forKey: "apiKey") }
+            .store(in: &cancellables)
+        $apiBaseURL
+            .sink { UserDefaults.standard.set($0, forKey: "apiBaseURL") }
+            .store(in: &cancellables)
+        $model
+            .sink { UserDefaults.standard.set($0, forKey: "model") }
             .store(in: &cancellables)
 
         // inputText の変更を 1 秒デバウンスしてから翻訳実行
@@ -52,31 +51,49 @@ class TranslationViewModel: ObservableObject {
 
     /// 翻訳リクエストを実行
     func translate() {
+        // 空白・改行のみなら翻訳せずクリア
+        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            translatedText = ""
+            return
+        }
+
+        // 入力テキストを使用
+        let textToTranslate = trimmed
+
+        // 自動検出 or 手動指定
         let detectedLang = (inputLanguage == "auto")
-            ? autodetectLanguage(inputText)
+            ? autodetectLanguage(textToTranslate)
             : inputLanguage
 
+        // Chat API 用メッセージ構成
         let messages: [[String:String]] = [
             ["role": "system", "content": "You are a helpful translator."],
             ["role": "user", "content":
-                "Translate this text from \(detectedLang) to \(outputLanguage):\n\n\(inputText)"
+                "Translate this text from \(detectedLang) to \(outputLanguage):\n\n\(textToTranslate)"
             ]
         ]
 
-        var request = URLRequest(url: endpoint)
+        // API エンドポイントの検証
+        guard let url = URL(string: apiBaseURL) else {
+            print("❌ Invalid API Base URL: \(apiBaseURL)")
+            return
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         let body: [String:Any] = [
-            "model": "gpt-4.1-nano",
+            "model": model,
             "messages": messages
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         #if DEBUG
+        print("🔷 [DEBUG] Request to \(url)")
+        print("🔷 [DEBUG] Headers:", request.allHTTPHeaderFields ?? [:])
         if let data = request.httpBody, let bodyStr = String(data: data, encoding: .utf8) {
-            print("🔷 [DEBUG] Request URL: \(request.url?.absoluteString ?? "")")
-            print("🔷 [DEBUG] Request Body: \(bodyStr)")
+            print("🔷 [DEBUG] Body:", bodyStr)
         }
         #endif
 
@@ -84,7 +101,7 @@ class TranslationViewModel: ObservableObject {
             .handleEvents(receiveOutput: { output in
                 #if DEBUG
                 if let resp = output.response as? HTTPURLResponse {
-                    print("🔶 [DEBUG] Response Status: \(resp.statusCode)")
+                    print("🔶 [DEBUG] Status: \(resp.statusCode)")
                 }
                 let dataStr = String(data: output.data, encoding: .utf8) ?? "<non-utf8>"
                 print("🔶 [DEBUG] Response Data: \(dataStr)")
@@ -114,7 +131,7 @@ class TranslationViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    /// クリップボードの文字列を翻訳
+    /// クリップボードの文字列を入力欄にセット（翻訳はデバウンスで自動実行）
     func translateClipboard() {
         if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
             inputText = text
