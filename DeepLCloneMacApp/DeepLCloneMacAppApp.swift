@@ -1,17 +1,12 @@
-//
-//  DeepLCloneMacAppApp.swift
-//  DeepLCloneMacApp
-//
-//  Created by HiroshiMatsunaga on 2025/05/12.
-//
-
 import SwiftUI
 
 @main
-struct DeepLCloneMacAppApp: App {
+struct DeepLCloneMacApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(viewModel: appDelegate.viewModel)
+                .frame(minWidth: 600, minHeight: 400)
         }
     }
 }

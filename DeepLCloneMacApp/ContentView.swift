@@ -1,24 +1,34 @@
-//
-//  ContentView.swift
-//  DeepLCloneMacApp
-//
-//  Created by HiroshiMatsunaga on 2025/05/12.
-//
-
+// MARK: - Main ContentView
 import SwiftUI
 
 struct ContentView: View {
+    @ObservedObject var viewModel: TranslationViewModel
+    let languages = ["auto"] + ["en","ja","fr","de","es","zh","ru","ko"]
+
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        VStack(alignment: .leading) {
+            HStack {
+                Picker("Input", selection: $viewModel.inputLanguage) { /* … */ }
+                Button(action: viewModel.swapLanguages) { Image(systemName: "arrow.left.arrow.right") }
+                Picker("Output", selection: $viewModel.outputLanguage) { /* … */ }
+            }
+            .padding(.bottom, 8)
+
+            HStack {
+                TextEditor(text: $viewModel.inputText)
+                    .font(.body).border(Color.gray)
+                TextEditor(text: $viewModel.translatedText)
+                    .font(.body).border(Color.gray)
+            }
         }
         .padding()
+        .onChange(of: viewModel.inputText) { _ in viewModel.translate() }
     }
 }
 
-#Preview {
-    ContentView()
+// MARK: - Swap languages helper
+extension TranslationViewModel {
+    func swapLanguages() {
+        (inputLanguage, outputLanguage) = (outputLanguage, inputLanguage)
+    }
 }
