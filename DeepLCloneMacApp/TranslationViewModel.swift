@@ -47,7 +47,7 @@ class TranslationViewModel: ObservableObject {
 
         // inputText の変更を 1 秒デバウンスしてから翻訳実行
         $inputText
-            .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
+            .debounce(for: .seconds(0.3), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 self?.translate()
             }
