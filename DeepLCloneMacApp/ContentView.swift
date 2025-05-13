@@ -2,25 +2,20 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var viewModel: TranslationViewModel
-    @State private var showingSettings = false  // 設定画面の表示フラグ
-    
-    // メイン画面で使う言語リスト
+    @State private var showingSettings = false
     let languages = ["auto","en","ja","fr","de","es","zh","ru","ko"]
 
     var body: some View {
-        VStack(spacing: 12) {
-            // ────────── ツールバー部 ──────────
+        VStack(alignment: .leading, spacing: 12) {
+            // 設定ボタン＋言語切替
             HStack {
-                // 設定画面を開くボタン
                 Button {
                     showingSettings.toggle()
                 } label: {
                     Image(systemName: "gearshape")
                 }
-                .help("APIキーやモデルを設定")
-                .padding(.trailing, 8)
+                .help("Open Settings")
 
-                // 入力言語 Picker
                 Picker("Input", selection: $viewModel.inputLanguage) {
                     Text("Auto").tag("auto")
                     ForEach(languages.filter { $0 != "auto" }, id: \.self) {
@@ -29,12 +24,10 @@ struct ContentView: View {
                 }
                 .pickerStyle(MenuPickerStyle())
 
-                // 入出力入れ替えボタン
                 Button { viewModel.swapLanguages() } label: {
                     Image(systemName: "arrow.left.arrow.right")
                 }
 
-                // 出力言語 Picker
                 Picker("Output", selection: $viewModel.outputLanguage) {
                     ForEach(languages.filter { $0 != "auto" }, id: \.self) {
                         Text($0.uppercased()).tag($0)
@@ -43,26 +36,37 @@ struct ContentView: View {
                 .pickerStyle(MenuPickerStyle())
             }
             .padding(.bottom, 8)
-            // ─────────────────────────────────
 
             // 入力／出力テキストエリア
-            HStack {
+            HStack(spacing: 8) {
+                // 左側入力エリアにオーバーレイ
                 TextEditor(text: $viewModel.inputText)
                     .font(.body)
                     .border(Color.gray)
-                TextEditor(text: $viewModel.translatedText)
-                    .font(.body)
-                    .border(Color.gray)
+                
+                // 右側翻訳結果エリア
+                ZStack {
+                    TextEditor(text: $viewModel.translatedText)
+                        .font(.body)
+                        .border(Color.gray)
+                    
+                    if viewModel.isLoading {
+                        // 半透明背景 + スピナー
+                        Color.black.opacity(0.15)
+                            .edgesIgnoringSafeArea(.all)
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle())
+                    }
+                }
             }
+            .frame(minHeight: 300)  // 必要に応じて高さ調整
         }
         .padding()
-        // 設定画面をモーダルで表示
         .sheet(isPresented: $showingSettings) {
             SettingsView(viewModel: viewModel)
         }
     }
 }
-
 
 /// 設定画面
 struct SettingsView: View {
@@ -149,7 +153,6 @@ struct SettingsView: View {
         .frame(minWidth: 400, minHeight: 450)
     }
 }
-
 
 // MARK: - Swap languages helper
 extension TranslationViewModel {

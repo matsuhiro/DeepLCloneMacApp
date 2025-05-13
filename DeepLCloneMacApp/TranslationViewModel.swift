@@ -1,3 +1,5 @@
+// TranslationViewModel.swift
+
 import Foundation
 import Combine
 import AppKit
@@ -17,93 +19,65 @@ class TranslationViewModel: ObservableObject {
     @Published var apiKey: String = UserDefaults.standard.string(forKey: "apiKey") ?? ""
     @Published var apiBaseURL: String = UserDefaults.standard.string(forKey: "apiBaseURL") ?? "https://api.openai.com/v1/chat/completions"
     @Published var model: String = UserDefaults.standard.string(forKey: "model") ?? "gpt-3.5-turbo"
-    
-    // ユーザーが追加可能なモデル一覧（永続化）
     @Published var availableModels: [String] =
         UserDefaults.standard.stringArray(forKey: "availableModels")
-        ?? ["gpt-3.5-turbo","gpt-4","gpt-4o-mini"]
+        ?? ["gpt-3.5-turbo", "gpt-4", "gpt-4o-mini"]
+
+    /// 通信中フラグ
+    @Published var isLoading: Bool = false
 
     private var cancellables = Set<AnyCancellable>()
+
+    /// デバウンス間隔（秒）
     private let debounceInterval: TimeInterval = 0.3
 
     init() {
-        // 言語設定変更時に永続化
-        $inputLanguage
-            .sink { UserDefaults.standard.set($0, forKey: "inputLanguage") }
-            .store(in: &cancellables)
-        $outputLanguage
-            .sink { UserDefaults.standard.set($0, forKey: "outputLanguage") }
-            .store(in: &cancellables)
-
-        // API設定変更時にも永続化
-        $apiKey
-            .sink { UserDefaults.standard.set($0, forKey: "apiKey") }
-            .store(in: &cancellables)
-        $apiBaseURL
-            .sink { UserDefaults.standard.set($0, forKey: "apiBaseURL") }
-            .store(in: &cancellables)
-        $model
-            .sink { UserDefaults.standard.set($0, forKey: "model") }
-            .store(in: &cancellables)
-        
+        // UserDefaults 永続化
+        [
+            ($inputLanguage, "inputLanguage"),
+            ($outputLanguage, "outputLanguage"),
+            ($apiKey, "apiKey"),
+            ($apiBaseURL, "apiBaseURL"),
+            ($model, "model")
+        ].forEach { publisher, key in
+            publisher
+                .sink { UserDefaults.standard.set($0, forKey: key) }
+                .store(in: &cancellables)
+        }
+        // availableModels 永続化
         $availableModels
             .sink { UserDefaults.standard.set($0, forKey: "availableModels") }
             .store(in: &cancellables)
-        
-        // inputText の変更を 1 秒デバウンスしてから翻訳実行
+
+        // 入力テキストの変更をデバウンスして翻訳実行
         $inputText
             .debounce(for: .seconds(debounceInterval), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.translate() }
             .store(in: &cancellables)
-        
-        // 入力言語が変わったら即翻訳
-        $inputLanguage
-          .dropFirst()  // 初期化直後の呼び出しを防ぎたい場合
-          .debounce(for: .seconds(debounceInterval), scheduler: RunLoop.main)
-          .sink { [weak self] _ in self?.translate() }
-          .store(in: &cancellables)
 
-        // 出力言語が変わったら即翻訳
-        $outputLanguage
-          .dropFirst()
-          .debounce(for: .seconds(debounceInterval), scheduler: RunLoop.main)
-          .sink { [weak self] _ in self?.translate() }
-          .store(in: &cancellables)
-
-        // モデルを切り替えたら即翻訳
-        $model
-          .dropFirst()
-          .debounce(for: .seconds(debounceInterval), scheduler: RunLoop.main)
-          .sink { [weak self] _ in self?.translate() }
-          .store(in: &cancellables)
+        // 言語／モデル変更をデバウンスして再翻訳
+        [$inputLanguage, $outputLanguage, $model].forEach { publisher in
+            publisher
+                .dropFirst()
+                .debounce(for: .seconds(debounceInterval), scheduler: RunLoop.main)
+                .sink { [weak self] _ in self?.translate() }
+                .store(in: &cancellables)
+        }
     }
 
     /// 翻訳リクエストを実行
     func translate() {
-        // 空白・改行のみなら翻訳せずクリア
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             translatedText = ""
             return
         }
-
-        // 入力テキストを使用
         let textToTranslate = trimmed
-
-        // 自動検出 or 手動指定
         let detectedLang = (inputLanguage == "auto")
             ? autodetectLanguage(textToTranslate)
             : inputLanguage
 
-        // Chat API 用メッセージ構成
-        let messages: [[String:String]] = [
-            ["role": "system", "content": "You are a helpful translator."],
-            ["role": "user", "content":
-                "Translate this text from \(detectedLang) to \(outputLanguage):\n\n\(textToTranslate)"
-            ]
-        ]
-
-        // API エンドポイントの検証
+        // リクエスト構築
         guard let url = URL(string: apiBaseURL) else {
             print("❌ Invalid API Base URL: \(apiBaseURL)")
             return
@@ -114,13 +88,18 @@ class TranslationViewModel: ObservableObject {
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         let body: [String:Any] = [
             "model": model,
-            "messages": messages
+            "messages": [
+                ["role": "system", "content": "You are a helpful translator."],
+                ["role": "user",   "content": "Translate this text from \(detectedLang) to \(outputLanguage):\n\n\(textToTranslate)"]
+            ]
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
+        // 通信開始フラグ
+        DispatchQueue.main.async { self.isLoading = true }
+
         #if DEBUG
         print("🔷 [DEBUG] Request to \(url)")
-        print("🔷 [DEBUG] Headers:", request.allHTTPHeaderFields ?? [:])
         if let data = request.httpBody, let bodyStr = String(data: data, encoding: .utf8) {
             print("🔷 [DEBUG] Body:", bodyStr)
         }
@@ -133,36 +112,36 @@ class TranslationViewModel: ObservableObject {
                     print("🔶 [DEBUG] Status: \(resp.statusCode)")
                 }
                 let dataStr = String(data: output.data, encoding: .utf8) ?? "<non-utf8>"
-                print("🔶 [DEBUG] Response Data: \(dataStr)")
+                print("🔶 [DEBUG] Response Data:", dataStr)
                 #endif
             })
             .map(\.data)
             .decode(type: ChatCompletionResponse.self, decoder: JSONDecoder())
             .receive(on: DispatchQueue.main)
             .sink(
-                receiveCompletion: { completion in
+                receiveCompletion: { [weak self] completion in
+                    self?.isLoading = false
                     #if DEBUG
                     if case .failure(let error) = completion {
-                        print("❌ [DEBUG] Translation error:", error)
+                        print("❌ [DEBUG] Error:", error)
                     }
                     #endif
                 },
                 receiveValue: { [weak self] response in
                     self?.translatedText = response
-                        .choices
-                        .first?
-                        .message
-                        .content
+                        .choices.first?
+                        .message.content
                         .trimmingCharacters(in: .whitespacesAndNewlines)
-                        ?? ""
+                    ?? ""
                 }
             )
             .store(in: &cancellables)
     }
 
-    /// クリップボードの文字列を入力欄にセット（翻訳はデバウンスで自動実行）
+    /// クリップボード翻訳（入力セットのみ）
     func translateClipboard() {
-        if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
+        if let text = NSPasteboard.general.string(forType: .string),
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             inputText = text
         }
     }
@@ -175,13 +154,10 @@ class TranslationViewModel: ObservableObject {
     }
 }
 
-// MARK: - API レスポンスモデル
+// API レスポンスモデル
 struct ChatCompletionResponse: Codable {
     struct Choice: Codable {
-        struct Message: Codable {
-            let role: String
-            let content: String
-        }
+        struct Message: Codable { let role: String; let content: String }
         let message: Message
     }
     let choices: [Choice]
